@@ -1,16 +1,14 @@
 @_exported import AsyncKit
 
 @_exported import class AsyncHTTPClient.HTTPClient
+@_exported import struct AsyncHTTPClient.HTTPClientError
 
-@_exported import OpenCrypto
+@_exported import Crypto
 @_exported import RoutingKit
 @_exported import ConsoleKit
 @_exported import Foundation
 
 @_exported import Logging
-@_exported import Metrics
-
-@_exported import MultipartKit
 
 @_exported import struct NIO.ByteBuffer
 @_exported import struct NIO.ByteBufferAllocator
@@ -32,6 +30,8 @@
 @_exported import enum NIOHTTP1.HTTPMethod
 @_exported import struct NIOHTTP1.HTTPVersion
 @_exported import enum NIOHTTP1.HTTPResponseStatus
+
+@_exported import enum NIOHTTPCompression.NIOHTTPDecompression
 
 @_exported import struct NIOSSL.TLSConfiguration
 

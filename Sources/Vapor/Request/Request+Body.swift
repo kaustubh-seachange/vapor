@@ -29,11 +29,13 @@ extension Request {
                 }
             case .collected(let buffer):
                 _ = handler(.buffer(buffer))
-            case .none: break
+                _ = handler(.end)
+            case .none:
+                _ = handler(.end)
             }
         }
         
-        public func collect(max: Int? = nil) -> EventLoopFuture<ByteBuffer?> {
+        public func collect(max: Int? = 1 << 14) -> EventLoopFuture<ByteBuffer?> {
             switch self.request.bodyStorage {
             case .stream(let stream):
                 return stream.consume(max: max, on: self.request.eventLoop).map { buffer in

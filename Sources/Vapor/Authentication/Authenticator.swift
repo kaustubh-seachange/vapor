@@ -1,24 +1,38 @@
 /// Capable of being authenticated.
 public protocol Authenticatable { }
 
-public protocol Authenticator {
-    associatedtype User: Authenticatable
+/// Helper for creating authentication middleware.
+///
+/// See `RequestAuthenticator` and `SessionAuthenticator` for more information.
+public protocol Authenticator: Middleware { }
+
+/// Help for creating authentication middleware based on `Request`.
+///
+/// `Authenticator`'s use the incoming request to check for authentication information.
+/// If valid authentication credentials are present, the authenticated user is added to `req.auth`.
+public protocol RequestAuthenticator: Authenticator {
+    func authenticate(request: Request) -> EventLoopFuture<Void>
 }
 
-public protocol RequestAuthenticator: Authenticator {
-    func authenticate(request: Request) -> EventLoopFuture<User?>
+extension RequestAuthenticator {
+    public func respond(to request: Request, chainingTo next: Responder) -> EventLoopFuture<Response> {
+        return self.authenticate(request: request).flatMap {
+            next.respond(to: request)
+        }
+    }
 }
 
 // MARK: Basic
 
+/// Helper for creating authentication middleware using the Basic authorization header.
 public protocol BasicAuthenticator: RequestAuthenticator {
-    func authenticate(basic: BasicAuthorization, for request: Request) -> EventLoopFuture<User?>
+    func authenticate(basic: BasicAuthorization, for request: Request) -> EventLoopFuture<Void>
 }
 
 extension BasicAuthenticator {
-    public func authenticate(request: Request) -> EventLoopFuture<User?> {
+    public func authenticate(request: Request) -> EventLoopFuture<Void> {
         guard let basicAuthorization = request.headers.basicAuthorization else {
-            return request.eventLoop.makeSucceededFuture(nil)
+            return request.eventLoop.makeSucceededFuture(())
         }
         return self.authenticate(basic: basicAuthorization, for: request)
     }
@@ -26,97 +40,36 @@ extension BasicAuthenticator {
 
 // MARK: Bearer
 
+/// Helper for creating authentication middleware using the Bearer authorization header.
 public protocol BearerAuthenticator: RequestAuthenticator {
-    func authenticate(bearer: BearerAuthorization, for request: Request) -> EventLoopFuture<User?>
+    func authenticate(bearer: BearerAuthorization, for request: Request) -> EventLoopFuture<Void>
 }
 
 extension BearerAuthenticator {
-    public func authenticate(request: Request) -> EventLoopFuture<User?> {
+    public func authenticate(request: Request) -> EventLoopFuture<Void> {
         guard let bearerAuthorization = request.headers.bearerAuthorization else {
-            return request.eventLoop.makeSucceededFuture(nil)
+            return request.eventLoop.makeSucceededFuture(())
         }
         return self.authenticate(bearer: bearerAuthorization, for: request)
     }
 }
 
-// MARK: User Token
-
-public protocol UserTokenAuthenticator: RequestAuthenticator {
-    associatedtype TokenAuthenticator: RequestAuthenticator where
-        TokenAuthenticator.User: AuthenticationToken,
-        TokenAuthenticator.User.User == User
-
-    var tokenAuthenticator: TokenAuthenticator { get }
-    func authenticate(token: TokenAuthenticator.User, for request: Request) -> EventLoopFuture<User?>
-}
-
-extension UserTokenAuthenticator {
-    public func authenticate(request: Request) -> EventLoopFuture<User?> {
-        return self.tokenAuthenticator.authenticate(request: request).flatMap { token in
-            guard let token = token else {
-                return request.eventLoop.makeSucceededFuture(nil)
-            }
-            return self.authenticate(token: token, for: request)
-        }
-    }
-}
-
-public protocol AuthenticationToken {
-    associatedtype User
-}
-
 // MARK: Credentials
 
+/// Helper for creating authentication middleware using request body contents.
 public protocol CredentialsAuthenticator: RequestAuthenticator {
     associatedtype Credentials: Content
-    func authenticate(credentials: Credentials, for request: Request) -> EventLoopFuture<User?>
+    func authenticate(credentials: Credentials, for request: Request) -> EventLoopFuture<Void>
 }
 
 extension CredentialsAuthenticator {
-    public func authenticate(request: Request) -> EventLoopFuture<User?> {
+    public func authenticate(request: Request) -> EventLoopFuture<Void> {
         let credentials: Credentials
         do {
             credentials = try request.content.decode(Credentials.self)
         } catch {
-            request.logger.error("Could not decode credentials: \(error)")
-            return request.eventLoop.makeSucceededFuture(nil)
+            return request.eventLoop.makeSucceededFuture(())
         }
         return self.authenticate(credentials: credentials, for: request)
-    }
-}
-
-
-// MARK: Middleware
-
-extension RequestAuthenticator {
-    public func middleware() -> Middleware {
-        return RequestAuthenticationMiddleware<Self>(authenticator: self)
-    }
-}
-
-private final class RequestAuthenticationMiddleware<A>: Middleware
-    where A: RequestAuthenticator
-{
-    public let authenticator: A
-
-    public init(authenticator: A) {
-        self.authenticator = authenticator
-    }
-
-    public func respond(to request: Request, chainingTo next: Responder) -> EventLoopFuture<Response> {
-        // if the user has already been authenticated
-        // by a previous middleware, continue
-        if request.auth.has(A.User.self) {
-            return next.respond(to: request)
-        }
-
-        // auth user on connection
-        return self.authenticator.authenticate(request: request).flatMap { a in
-            if let a = a {
-                // set authed on request
-                request.auth.login(a)
-            }
-            return next.respond(to: request)
-        }
     }
 }

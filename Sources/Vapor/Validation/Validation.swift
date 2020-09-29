@@ -12,9 +12,15 @@ public struct Validation {
                 } else {
                     result = ValidatorResults.Skipped()
                 }
+            } catch DecodingError.valueNotFound {
+                result = ValidatorResults.NotFound()
+           } catch DecodingError.typeMismatch(let type, _) {
+                result = ValidatorResults.TypeMismatch(type: type)
+            } catch DecodingError.dataCorrupted(let context) {
+                result = ValidatorResults.Invalid(reason: context.debugDescription)
             } catch {
-                result = ValidatorResults.Codable(error: error)
-            }
+               result = ValidatorResults.Codable(error: error)
+           }
             return .init(key: key, result: result)
         }
     }
@@ -23,9 +29,17 @@ public struct Validation {
         self.init { container in
             let result: ValidatorResult
             do {
-                let nested = try container.nestedContainer(keyedBy: ValidationKey.self, forKey: key)
-                let results = validations.validate(nested)
-                result = ValidatorResults.Nested(results: results.results)
+                if container.contains(key), !required, try container.decodeNil(forKey: key) {
+                    result = ValidatorResults.Skipped()
+                } else if container.contains(key) {
+                    let nested = try container.nestedContainer(keyedBy: ValidationKey.self, forKey: key)
+                    let results = validations.validate(nested)
+                    result = ValidatorResults.Nested(results: results.results)
+                } else if required {
+                    result = ValidatorResults.Missing()
+                } else {
+                    result = ValidatorResults.Skipped()
+                }
             } catch {
                 result = ValidatorResults.Codable(error: error)
             }

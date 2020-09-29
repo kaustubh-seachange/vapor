@@ -1,5 +1,4 @@
-
-/// Starts serving the `Application`'s `Responder` over HTTP.
+/// Boots the application's server. Listens for `SIGINT` and `SIGTERM` for graceful shutdown.
 ///
 ///     $ swift run Run serve
 ///     Server starting on http://localhost:8080
@@ -15,7 +14,16 @@ public final class ServeCommand: Command {
         @Option(name: "bind", short: "b", help: "Convenience for setting hostname and port together.")
         var bind: String?
 
+        @Option(name: "unix-socket", short: nil, help: "Set the path for the unix domain socket file the server will bind to.")
+        var socketPath: String?
+
         public init() { }
+    }
+
+    /// Errors that may be thrown when serving a server
+    public enum Error: Swift.Error {
+        /// Incompatible flags were used together (for instance, specifying a socket path along with a port)
+        case incompatibleFlags
     }
 
     /// See `Command`.
@@ -28,7 +36,7 @@ public final class ServeCommand: Command {
 
     private var signalSources: [DispatchSourceSignal]
     private var didShutdown: Bool
-    private var server: Application.Server.Running?
+    private var server: Server?
     private var running: Application.Running?
 
     /// Create a new `ServeCommand`.
@@ -39,14 +47,26 @@ public final class ServeCommand: Command {
 
     /// See `Command`.
     public func run(using context: CommandContext, signature: Signature) throws {
-        let hostname = signature.hostname
-            // 0.0.0.0:8080, 0.0.0.0, parse hostname
-            ?? signature.bind?.split(separator: ":").first.flatMap(String.init)
-        let port = signature.port
-            // 0.0.0.0:8080, :8080, parse port
-            ?? signature.bind?.split(separator: ":").last.flatMap(String.init).flatMap(Int.init)
-        let server = try context.application.server.start(hostname: hostname, port: port)
-        self.server = server
+        switch (signature.hostname, signature.port, signature.bind, signature.socketPath) {
+        case (.none, .none, .none, .none): // use defaults
+            try context.application.server.start(address: nil)
+            
+        case (.none, .none, .none, .some(let socketPath)): // unix socket
+            try context.application.server.start(address: .unixDomainSocket(path: socketPath))
+            
+        case (.none, .none, .some(let address), .none): // bind ("hostname:port")
+            let hostname = address.split(separator: ":").first.flatMap(String.init)
+            let port = address.split(separator: ":").last.flatMap(String.init).flatMap(Int.init)
+            
+            try context.application.server.start(address: .hostname(hostname, port: port))
+            
+        case (let hostname, let port, .none, .none): // hostname / port
+            try context.application.server.start(address: .hostname(hostname, port: port))
+            
+        default: throw Error.incompatibleFlags
+        }
+        
+        self.server = context.application.server
 
         // allow the server to be stopped or waited for
         let promise = context.application.eventLoopGroup.next().makePromise(of: Void.self)
@@ -72,7 +92,7 @@ public final class ServeCommand: Command {
     func shutdown() {
         self.didShutdown = true
         self.running?.stop()
-        if let server = server {
+        if let server = self.server {
             server.shutdown()
         }
         self.signalSources.forEach { $0.cancel() } // clear refs
