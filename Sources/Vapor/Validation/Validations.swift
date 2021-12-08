@@ -22,7 +22,7 @@ public struct Validations {
         let validation = Validation(key: key, result: result)
         self.storage.append(validation)
     }
-    
+
     public mutating func add(
         _ key: ValidationKey,
         required: Bool = true,
@@ -30,16 +30,25 @@ public struct Validations {
     ) {
         var validations = Validations()
         nested(&validations)
-        let validation = Validation(key: key, required: required, nested: validations)
+        let validation = Validation(nested: key, required: required, keyed: validations)
+        self.storage.append(validation)
+    }
+    
+    public mutating func add(
+        each key: ValidationKey,
+        required: Bool = true,
+        _ handler: @escaping (Int, inout Validations) -> ()
+    ) {
+        let validation = Validation(nested: key, required: required, unkeyed: handler)
         self.storage.append(validation)
     }
     
     public func validate(request: Request) throws -> ValidationsResult {
         guard let contentType = request.headers.contentType else {
-            throw Abort(.unprocessableEntity)
+            throw Abort(.unprocessableEntity, reason: "Missing \"Content-Type\" header")
         }
         guard let body = request.body.data else {
-            throw Abort(.unprocessableEntity)
+            throw Abort(.unprocessableEntity, reason: "Empty Body")
         }
         let contentDecoder = try ContentConfiguration.global.requireDecoder(for: contentType)
         let decoder = try contentDecoder.decode(DecoderUnwrapper.self, from: body, headers: request.headers)
